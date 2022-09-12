@@ -330,27 +330,27 @@ def blob_dog(image, min_sigma=1, max_sigma=50, sigma_ratio=1.6, threshold=0.5,
     image = image.astype(float_dtype, copy=False)
 
     # if both min and max sigma are scalar, function returns only one sigma
-    scalar_sigma = np.isscalar(max_sigma) and np.isscalar(min_sigma)
+    scalar_sigma = cp.isscalar(max_sigma) and cp.isscalar(min_sigma)
 
     # Gaussian filter requires that sequence-type sigmas have same
     # dimensionality as image. This broadcasts scalar kernels
-    if np.isscalar(max_sigma):
-        max_sigma = np.full(image.ndim, max_sigma, dtype=float_dtype)
-    if np.isscalar(min_sigma):
-        min_sigma = np.full(image.ndim, min_sigma, dtype=float_dtype)
+    if cp.isscalar(max_sigma):
+        max_sigma = cp.full(image.ndim, max_sigma, dtype=float_dtype)
+    if cp.isscalar(min_sigma):
+        min_sigma = cp.full(image.ndim, min_sigma, dtype=float_dtype)
 
     # Convert sequence types to array
-    min_sigma = np.asarray(min_sigma, dtype=float_dtype)
-    max_sigma = np.asarray(max_sigma, dtype=float_dtype)
+    min_sigma = cp.asarray(min_sigma, dtype=float_dtype)
+    max_sigma = cp.asarray(max_sigma, dtype=float_dtype)
 
     if sigma_ratio <= 1.0:
         raise ValueError('sigma_ratio must be > 1.0')
 
     # k such that min_sigma*(sigma_ratio**k) > max_sigma
-    k = int(np.mean(np.log(max_sigma / min_sigma) / np.log(sigma_ratio) + 1))
+    k = int(cp.mean(cp.log(max_sigma / min_sigma) / cp.log(sigma_ratio) + 1))
 
     # a geometric progression of standard deviations for gaussian kernels
-    sigma_list = np.array([min_sigma * (sigma_ratio ** i)
+    sigma_list = cp.array([min_sigma * (sigma_ratio ** i)
                            for i in range(k + 1)])
 
     gaussian_images = [gaussian(image, s, mode='reflect') for s in sigma_list]
@@ -365,7 +365,7 @@ def blob_dog(image, min_sigma=1, max_sigma=50, sigma_ratio=1.6, threshold=0.5,
         (gaussian_images[i] - gaussian_images[i + 1]) * sf for i in range(k)
     ]
 
-    image_cube = np.stack(dog_images, axis=-1)
+    image_cube = cp.stack(dog_images, axis=-1)
 
     exclude_border = _format_exclude_border(image.ndim, exclude_border)
     local_maxima = peak_local_max(
@@ -373,12 +373,12 @@ def blob_dog(image, min_sigma=1, max_sigma=50, sigma_ratio=1.6, threshold=0.5,
         threshold_abs=threshold,
         threshold_rel=threshold_rel,
         exclude_border=exclude_border,
-        footprint=np.ones((3,) * (image.ndim + 1)),
+        footprint=cp.ones((3,) * (image.ndim + 1)),
     )
 
     # Catch no peaks
     if local_maxima.size == 0:
-        return np.empty((0, image.ndim + (1 if scalar_sigma else image.ndim)))
+        return cp.empty((0, image.ndim + (1 if scalar_sigma else image.ndim)))
 
     # Convert local_maxima to float64
     lm = local_maxima.astype(float_dtype)
@@ -392,7 +392,7 @@ def blob_dog(image, min_sigma=1, max_sigma=50, sigma_ratio=1.6, threshold=0.5,
         sigmas_of_peaks = sigmas_of_peaks[:, 0:1]
 
     # Remove sigma index and replace with sigmas
-    lm = np.hstack([lm[:, :-1], sigmas_of_peaks])
+    lm = cp.hstack([lm[:, :-1], sigmas_of_peaks])
 
     sigma_dim = sigmas_of_peaks.shape[1]
 
@@ -665,24 +665,24 @@ def blob_doh(image, min_sigma=1, max_sigma=30, num_sigma=10, threshold=0.01,
 
     if log_scale:
         start, stop = math.log(min_sigma, 10), math.log(max_sigma, 10)
-        sigma_list = np.logspace(start, stop, num_sigma)
+        sigma_list = cp.logspace(start, stop, num_sigma)
     else:
-        sigma_list = np.linspace(min_sigma, max_sigma, num_sigma)
+        sigma_list = cp.linspace(min_sigma, max_sigma, num_sigma)
 
     hessian_images = [_hessian_matrix_det(image, s) for s in sigma_list]
-    image_cube = np.dstack(hessian_images)
+    image_cube = cp.dstack(hessian_images)
 
     local_maxima = peak_local_max(image_cube,
                                   threshold_abs=threshold,
                                   threshold_rel=threshold_rel,
                                   exclude_border=False,
-                                  footprint=np.ones((3,) * image_cube.ndim))
+                                  footprint=cp.ones((3,) * image_cube.ndim))
 
     # Catch no peaks
     if local_maxima.size == 0:
-        return np.empty((0, 3))
+        return cp.empty((0, 3))
     # Convert local_maxima to float64
-    lm = local_maxima.astype(np.float64)
+    lm = local_maxima.astype(cp.float64)
     # Convert the last index to its corresponding scale value
     lm[:, -1] = sigma_list[local_maxima[:, -1]]
     return _prune_blobs(lm, overlap)
