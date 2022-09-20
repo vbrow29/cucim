@@ -1,6 +1,5 @@
 import math
 
-import cupy as cp
 import numpy as np
 import scipy.ndimage as ndi
 from scipy import spatial
@@ -8,8 +7,8 @@ from scipy import spatial
 from .._shared.filters import gaussian
 from .._shared.utils import _supported_float_type, check_nD
 from ..transform import integral_image
-from cucim.skimage.util import img_as_float
-#from ._hessian_det_appx import _hessian_matrix_det
+from ..util import img_as_float
+from ._hessian_det_appx import _hessian_matrix_det
 from .peak import peak_local_max
 
 # This basic blob detection algorithm is based on:
@@ -38,11 +37,11 @@ def _compute_disk_overlap(d, r1, r2):
     """
 
     ratio1 = (d ** 2 + r1 ** 2 - r2 ** 2) / (2 * d * r1)
-    ratio1 = cp.clip(ratio1, -1, 1)
+    ratio1 = np.clip(ratio1, -1, 1)
     acos1 = math.acos(ratio1)
 
     ratio2 = (d ** 2 + r2 ** 2 - r1 ** 2) / (2 * d * r2)
-    ratio2 = cp.clip(ratio2, -1, 1)
+    ratio2 = np.clip(ratio2, -1, 1)
     acos2 = math.acos(ratio2)
 
     a = -d + r2 + r1
@@ -130,7 +129,7 @@ def _blob_overlap(blob1, blob2, *, sigma_dim=1):
     pos1 = blob1[:ndim] / (max_sigma * root_ndim)
     pos2 = blob2[:ndim] / (max_sigma * root_ndim)
 
-    d = cp.sqrt(cp.sum((pos2 - pos1)**2))
+    d = np.sqrt(np.sum((pos2 - pos1)**2))
     if d > r1 + r2:  # centers farther than sum of radii, so no overlap
         return 0.0
 
@@ -172,7 +171,7 @@ def _prune_blobs(blobs_array, overlap, *, sigma_dim=1):
     sigma = blobs_array[:, -sigma_dim:].max()
     distance = 2 * sigma * math.sqrt(blobs_array.shape[1] - sigma_dim)
     tree = spatial.cKDTree(blobs_array[:, :-sigma_dim])
-    pairs = cp.array(list(tree.query_pairs(distance)))
+    pairs = np.array(list(tree.query_pairs(distance)))
     if len(pairs) == 0:
         return blobs_array
     else:
@@ -186,7 +185,7 @@ def _prune_blobs(blobs_array, overlap, *, sigma_dim=1):
                 else:
                     blob1[-1] = 0
 
-    return cp.stack([b for b in blobs_array if b[-1] > 0])
+    return np.stack([b for b in blobs_array if b[-1] > 0])
 
 
 def _format_exclude_border(img_ndim, exclude_border):
@@ -330,27 +329,27 @@ def blob_dog(image, min_sigma=1, max_sigma=50, sigma_ratio=1.6, threshold=0.5,
     image = image.astype(float_dtype, copy=False)
 
     # if both min and max sigma are scalar, function returns only one sigma
-    scalar_sigma = cp.isscalar(max_sigma) and cp.isscalar(min_sigma)
+    scalar_sigma = np.isscalar(max_sigma) and np.isscalar(min_sigma)
 
     # Gaussian filter requires that sequence-type sigmas have same
     # dimensionality as image. This broadcasts scalar kernels
-    if cp.isscalar(max_sigma):
-        max_sigma = cp.full(image.ndim, max_sigma, dtype=float_dtype)
-    if cp.isscalar(min_sigma):
-        min_sigma = cp.full(image.ndim, min_sigma, dtype=float_dtype)
+    if np.isscalar(max_sigma):
+        max_sigma = np.full(image.ndim, max_sigma, dtype=float_dtype)
+    if np.isscalar(min_sigma):
+        min_sigma = np.full(image.ndim, min_sigma, dtype=float_dtype)
 
     # Convert sequence types to array
-    min_sigma = cp.asarray(min_sigma, dtype=float_dtype)
-    max_sigma = cp.asarray(max_sigma, dtype=float_dtype)
+    min_sigma = np.asarray(min_sigma, dtype=float_dtype)
+    max_sigma = np.asarray(max_sigma, dtype=float_dtype)
 
     if sigma_ratio <= 1.0:
         raise ValueError('sigma_ratio must be > 1.0')
 
     # k such that min_sigma*(sigma_ratio**k) > max_sigma
-    k = int(cp.mean(cp.log(max_sigma / min_sigma) / cp.log(sigma_ratio) + 1))
+    k = int(np.mean(np.log(max_sigma / min_sigma) / np.log(sigma_ratio) + 1))
 
     # a geometric progression of standard deviations for gaussian kernels
-    sigma_list = cp.array([min_sigma * (sigma_ratio ** i)
+    sigma_list = np.array([min_sigma * (sigma_ratio ** i)
                            for i in range(k + 1)])
 
     gaussian_images = [gaussian(image, s, mode='reflect') for s in sigma_list]
@@ -365,7 +364,7 @@ def blob_dog(image, min_sigma=1, max_sigma=50, sigma_ratio=1.6, threshold=0.5,
         (gaussian_images[i] - gaussian_images[i + 1]) * sf for i in range(k)
     ]
 
-    image_cube = cp.stack(dog_images, axis=-1)
+    image_cube = np.stack(dog_images, axis=-1)
 
     exclude_border = _format_exclude_border(image.ndim, exclude_border)
     local_maxima = peak_local_max(
@@ -373,12 +372,12 @@ def blob_dog(image, min_sigma=1, max_sigma=50, sigma_ratio=1.6, threshold=0.5,
         threshold_abs=threshold,
         threshold_rel=threshold_rel,
         exclude_border=exclude_border,
-        footprint=cp.ones((3,) * (image.ndim + 1)),
+        footprint=np.ones((3,) * (image.ndim + 1)),
     )
 
     # Catch no peaks
     if local_maxima.size == 0:
-        return cp.empty((0, image.ndim + (1 if scalar_sigma else image.ndim)))
+        return np.empty((0, image.ndim + (1 if scalar_sigma else image.ndim)))
 
     # Convert local_maxima to float64
     lm = local_maxima.astype(float_dtype)
@@ -392,7 +391,7 @@ def blob_dog(image, min_sigma=1, max_sigma=50, sigma_ratio=1.6, threshold=0.5,
         sigmas_of_peaks = sigmas_of_peaks[:, 0:1]
 
     # Remove sigma index and replace with sigmas
-    lm = cp.hstack([lm[:, :-1], sigmas_of_peaks])
+    lm = np.hstack([lm[:, :-1], sigmas_of_peaks])
 
     sigma_dim = sigmas_of_peaks.shape[1]
 
@@ -505,33 +504,33 @@ def blob_log(image, min_sigma=1, max_sigma=50, num_sigma=10, threshold=.2,
 
     # if both min and max sigma are scalar, function returns only one sigma
     scalar_sigma = (
-        True if cp.isscalar(max_sigma) and cp.isscalar(min_sigma) else False
+        True if np.isscalar(max_sigma) and np.isscalar(min_sigma) else False
     )
 
     # Gaussian filter requires that sequence-type sigmas have same
     # dimensionality as image. This broadcasts scalar kernels
-    if cp.isscalar(max_sigma):
-        max_sigma = cp.full(image.ndim, max_sigma, dtype=float_dtype)
-    if cp.isscalar(min_sigma):
-        min_sigma = cp.full(image.ndim, min_sigma, dtype=float_dtype)
+    if np.isscalar(max_sigma):
+        max_sigma = np.full(image.ndim, max_sigma, dtype=float_dtype)
+    if np.isscalar(min_sigma):
+        min_sigma = np.full(image.ndim, min_sigma, dtype=float_dtype)
 
     # Convert sequence types to array
-    min_sigma = cp.asarray(min_sigma, dtype=float_dtype)
-    max_sigma = cp.asarray(max_sigma, dtype=float_dtype)
+    min_sigma = np.asarray(min_sigma, dtype=float_dtype)
+    max_sigma = np.asarray(max_sigma, dtype=float_dtype)
 
     if log_scale:
-        start = cp.log10(min_sigma)
-        stop = cp.log10(max_sigma)
-        sigma_list = cp.logspace(start, stop, num_sigma)
+        start = np.log10(min_sigma)
+        stop = np.log10(max_sigma)
+        sigma_list = np.logspace(start, stop, num_sigma)
     else:
-        sigma_list = cp.linspace(min_sigma, max_sigma, num_sigma)
+        sigma_list = np.linspace(min_sigma, max_sigma, num_sigma)
 
     # computing gaussian laplace
     # average s**2 provides scale invariance
-    gl_images = [-ndi.gaussian_laplace(image, s) * cp.mean(s) ** 2
+    gl_images = [-ndi.gaussian_laplace(image, s) * np.mean(s) ** 2
                  for s in sigma_list]
 
-    image_cube = cp.stack(gl_images, axis=-1)
+    image_cube = np.stack(gl_images, axis=-1)
 
     exclude_border = _format_exclude_border(image.ndim, exclude_border)
     local_maxima = peak_local_max(
@@ -539,12 +538,12 @@ def blob_log(image, min_sigma=1, max_sigma=50, num_sigma=10, threshold=.2,
         threshold_abs=threshold,
         threshold_rel=threshold_rel,
         exclude_border=exclude_border,
-        footprint=cp.ones((3,) * (image.ndim + 1)),
+        footprint=np.ones((3,) * (image.ndim + 1)),
     )
 
     # Catch no peaks
     if local_maxima.size == 0:
-        return cp.empty((0, image.ndim + (1 if scalar_sigma else image.ndim)))
+        return np.empty((0, image.ndim + (1 if scalar_sigma else image.ndim)))
 
     # Convert local_maxima to float64
     lm = local_maxima.astype(float_dtype)
@@ -558,9 +557,131 @@ def blob_log(image, min_sigma=1, max_sigma=50, num_sigma=10, threshold=.2,
         sigmas_of_peaks = sigmas_of_peaks[:, 0:1]
 
     # Remove sigma index and replace with sigmas
-    lm = cp.hstack([lm[:, :-1], sigmas_of_peaks])
+    lm = np.hstack([lm[:, :-1], sigmas_of_peaks])
 
     sigma_dim = sigmas_of_peaks.shape[1]
 
     return _prune_blobs(lm, overlap, sigma_dim=sigma_dim)
 
+
+def blob_doh(image, min_sigma=1, max_sigma=30, num_sigma=10, threshold=0.01,
+             overlap=.5, log_scale=False, *, threshold_rel=None):
+    """Finds blobs in the given grayscale image.
+
+    Blobs are found using the Determinant of Hessian method [1]_. For each blob
+    found, the method returns its coordinates and the standard deviation
+    of the Gaussian Kernel used for the Hessian matrix whose determinant
+    detected the blob. Determinant of Hessians is approximated using [2]_.
+
+    Parameters
+    ----------
+    image : 2D ndarray
+        Input grayscale image.Blobs can either be light on dark or vice versa.
+    min_sigma : float, optional
+        The minimum standard deviation for Gaussian Kernel used to compute
+        Hessian matrix. Keep this low to detect smaller blobs.
+    max_sigma : float, optional
+        The maximum standard deviation for Gaussian Kernel used to compute
+        Hessian matrix. Keep this high to detect larger blobs.
+    num_sigma : int, optional
+        The number of intermediate values of standard deviations to consider
+        between `min_sigma` and `max_sigma`.
+    threshold : float or None, optional
+        The absolute lower bound for scale space maxima. Local maxima smaller
+        than `threshold` are ignored. Reduce this to detect blobs with lower
+        intensities. If `threshold_rel` is also specified, whichever threshold
+        is larger will be used. If None, `threshold_rel` is used instead.
+    overlap : float, optional
+        A value between 0 and 1. If the area of two blobs overlaps by a
+        fraction greater than `threshold`, the smaller blob is eliminated.
+    log_scale : bool, optional
+        If set intermediate values of standard deviations are interpolated
+        using a logarithmic scale to the base `10`. If not, linear
+        interpolation is used.
+    threshold_rel : float or None, optional
+        Minimum intensity of peaks, calculated as
+        ``max(doh_space) * threshold_rel``, where ``doh_space`` refers to the
+        stack of Determinant-of-Hessian (DoH) images computed internally. This
+        should have a value between 0 and 1. If None, `threshold` is used
+        instead.
+
+    Returns
+    -------
+    A : (n, 3) ndarray
+        A 2d array with each row representing 3 values, ``(y,x,sigma)``
+        where ``(y,x)`` are coordinates of the blob and ``sigma`` is the
+        standard deviation of the Gaussian kernel of the Hessian Matrix whose
+        determinant detected the blob.
+
+    References
+    ----------
+    .. [1] https://en.wikipedia.org/wiki/Blob_detection#The_determinant_of_the_Hessian
+
+    .. [2] Herbert Bay, Andreas Ess, Tinne Tuytelaars, Luc Van Gool,
+           "SURF: Speeded Up Robust Features"
+           ftp://ftp.vision.ee.ethz.ch/publications/articles/eth_biwi_00517.pdf
+
+    Examples
+    --------
+    >>> from skimage import data, feature
+    >>> img = data.coins()
+    >>> feature.blob_doh(img)
+    array([[197.        , 153.        ,  20.33333333],
+           [124.        , 336.        ,  20.33333333],
+           [126.        , 153.        ,  20.33333333],
+           [195.        , 100.        ,  23.55555556],
+           [192.        , 212.        ,  23.55555556],
+           [121.        , 271.        ,  30.        ],
+           [126.        , 101.        ,  20.33333333],
+           [193.        , 275.        ,  23.55555556],
+           [123.        , 205.        ,  20.33333333],
+           [270.        , 363.        ,  30.        ],
+           [265.        , 113.        ,  23.55555556],
+           [262.        , 243.        ,  23.55555556],
+           [185.        , 348.        ,  30.        ],
+           [156.        , 302.        ,  30.        ],
+           [123.        ,  44.        ,  23.55555556],
+           [260.        , 173.        ,  30.        ],
+           [197.        ,  44.        ,  20.33333333]])
+
+    Notes
+    -----
+    The radius of each blob is approximately `sigma`.
+    Computation of Determinant of Hessians is independent of the standard
+    deviation. Therefore detecting larger blobs won't take more time. In
+    methods line :py:meth:`blob_dog` and :py:meth:`blob_log` the computation
+    of Gaussians for larger `sigma` takes more time. The downside is that
+    this method can't be used for detecting blobs of radius less than `3px`
+    due to the box filters used in the approximation of Hessian Determinant.
+    """
+    check_nD(image, 2)
+
+    image = img_as_float(image)
+    float_dtype = _supported_float_type(image.dtype)
+    image = image.astype(float_dtype, copy=False)
+
+    image = integral_image(image)
+
+    if log_scale:
+        start, stop = math.log(min_sigma, 10), math.log(max_sigma, 10)
+        sigma_list = np.logspace(start, stop, num_sigma)
+    else:
+        sigma_list = np.linspace(min_sigma, max_sigma, num_sigma)
+
+    hessian_images = [_hessian_matrix_det(image, s) for s in sigma_list]
+    image_cube = np.dstack(hessian_images)
+
+    local_maxima = peak_local_max(image_cube,
+                                  threshold_abs=threshold,
+                                  threshold_rel=threshold_rel,
+                                  exclude_border=False,
+                                  footprint=np.ones((3,) * image_cube.ndim))
+
+    # Catch no peaks
+    if local_maxima.size == 0:
+        return np.empty((0, 3))
+    # Convert local_maxima to float64
+    lm = local_maxima.astype(np.float64)
+    # Convert the last index to its corresponding scale value
+    lm[:, -1] = sigma_list[local_maxima[:, -1]]
+    return _prune_blobs(lm, overlap)
